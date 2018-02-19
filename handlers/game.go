@@ -7,6 +7,7 @@ import (
 
 const (
 	EventNone int = iota
+	EventGameCreated
 	EventMoveRequest
 	EventMoveSuccess
 	EventMoveFail
@@ -19,7 +20,11 @@ const (
 )
 
 func BuildGame(eventStore *db.EventStore, gameID string) *chess.Game {
-	game := chess.NewGame()
+	return ReplayGame(eventStore, gameID, -1)
+}
+
+func ReplayGame(eventStore *db.EventStore, gameID string, lastEventID int) *chess.Game {
+	var game *chess.Game
 
 	for _, event := range eventStore.GetEvents() {
 		if event.AggregateID != gameID {
@@ -27,10 +32,16 @@ func BuildGame(eventStore *db.EventStore, gameID string) *chess.Game {
 		}
 
 		switch event.EventType {
+		case EventGameCreated:
+			game = chess.NewGame()
 		case EventMoveSuccess:
 			game.Move(chess.ParseMove(event.EventData))
 		case EventPromotionSuccess:
 			game.Promote(chess.ParsePromotion(event.EventData))
+		}
+
+		if event.Id == lastEventID {
+			return game
 		}
 	}
 	return game

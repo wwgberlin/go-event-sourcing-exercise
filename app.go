@@ -8,7 +8,6 @@ import (
 	"io/ioutil"
 	"log"
 	"net/http"
-	"strconv"
 	"strings"
 
 	"github.com/wwgberlin/go-event-sourcing-exercise/chess"
@@ -21,6 +20,7 @@ import (
 type app struct {
 	db *db.EventStore
 }
+
 type Board struct {
 	Squares [][]chess.Square
 	Moves   []string
@@ -52,6 +52,11 @@ func (a *app) getGame(gameID string) *chess.Game {
 	}
 	return handlers.BuildGame(a.db, gameID)
 }
+
+func (a *app) replayGame(gameID string, lastEventID int) *chess.Game {
+	return handlers.ReplayGame(a.db, gameID, lastEventID)
+}
+
 func (a *app) newGameHandler(w http.ResponseWriter, r *http.Request) {
 	data, err := ioutil.ReadFile("./public/static/new_game.html")
 	if err != nil {
@@ -63,6 +68,13 @@ func (a *app) newGameHandler(w http.ResponseWriter, r *http.Request) {
 
 func (a *app) createGameHandler(w http.ResponseWriter, r *http.Request) {
 	gameID := namegen.Generate()
+
+	a.db.Persist(db.Event{
+		Id:          0,
+		AggregateID: gameID,
+		EventData:   "",
+		EventType:   handlers.EventGameCreated,
+	})
 	log.Println(fmt.Errorf("New game created: %s", gameID))
 
 	w.Header().Add("Location", "/game?game_id="+gameID)
@@ -117,37 +129,6 @@ func (a *app) promotionsHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Write([]byte(strings.Join(strs, ",")))
 	return
-}
-
-// TODO: err on invalid events and games; extend error handling with err codes and msgs
-func (a *app) replayHandler(w http.ResponseWriter, r *http.Request) {
-	gameID := r.URL.Query().Get("game_id")
-	lastEventString := r.URL.Query().Get("target")
-	lastEventID, err := strconv.Atoi(lastEventString)
-
-	if err != nil {
-		log.Println(err)
-	}
-
-	var eventSubset []db.Event
-	for _, e := range a.db.GetEvents() {
-		if e.Id == lastEventID {
-			break
-		}
-		if e.AggregateID == gameID {
-			eventSubset = append(eventSubset, e)
-		}
-	}
-
-	game := handlers.BuildGame(a.db, gameID)
-
-	w.WriteHeader(http.StatusOK)
-	var tpl bytes.Buffer
-	t := template.Must(template.ParseFiles("templates/board.tmpl", "templates/game.tmpl"))
-	if err := t.ExecuteTemplate(&tpl, "base", page{Name: gameID, Board: Board{Squares: game.Draw(), Moves: game.Moves()}}); err != nil {
-		panic(err)
-	}
-	w.Write(tpl.Bytes())
 }
 
 func (a *app) eventIDsHandler(w http.ResponseWriter, r *http.Request) {
